@@ -42,6 +42,13 @@ export class DidDeactivatedError extends StellarIdError {
   }
 }
 
+/** The DID ledger entry is archived on-chain and must be restored before reading or mutating. */
+export class DidArchivedError extends StellarIdError {
+  constructor(did: string, cause?: unknown) {
+    super(`DID "${did}" state is archived on-chain and must be restored.`, "DID_ARCHIVED", cause);
+  }
+}
+
 /** A credential proof failed: bad signature, unknown key, or unanchored hash. */
 export class InvalidProofError extends StellarIdError {
   constructor(detail: string) {

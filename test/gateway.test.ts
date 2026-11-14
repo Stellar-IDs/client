@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { Err, Ok } from "@stellar/stellar-sdk/contract";
-import { contractErrorName, mapCallError, unwrapResult } from "../src/gateway.js";
+import { AssembledTransaction, Err, Ok } from "@stellar/stellar-sdk/contract";
+import { contractErrorName, isArchivedError, mapCallError, unwrapResult } from "../src/gateway.js";
 import {
+  DidArchivedError,
   DidDeactivatedError,
   DidNotFoundError,
   NetworkError,
@@ -17,7 +18,7 @@ describe("contractErrorName", () => {
   });
 
   it("maps host error codes from failed simulations", () => {
-    expect(contractErrorName(new Error('HostError: Error(Contract, #2)\n\nEvent log'))).toBe(
+    expect(contractErrorName(new Error("HostError: Error(Contract, #2)\n\nEvent log"))).toBe(
       "AlreadyExists",
     );
     expect(contractErrorName(new Error("HostError: Error(Contract, #9)"))).toBe("LimitExceeded");
@@ -27,6 +28,27 @@ describe("contractErrorName", () => {
   it("returns undefined for unrelated failures", () => {
     expect(contractErrorName(new Error("boom"))).toBeUndefined();
     expect(contractErrorName(null)).toBeUndefined();
+  });
+});
+
+describe("isArchivedError", () => {
+  it("detects SDK ExpiredStateError, DidArchivedError, restorePreamble, and archived messages", () => {
+    expect(isArchivedError(new DidArchivedError(DID))).toBe(true);
+    expect(
+      isArchivedError(
+        new AssembledTransaction.Errors.ExpiredState(
+          "You need to restore some contract state before you can invoke this method.",
+        ),
+      ),
+    ).toBe(true);
+    expect(isArchivedError({ restorePreamble: { minResourceFee: "100" } })).toBe(true);
+    expect(isArchivedError(new Error("LEDGER_ENTRY_RESTORATION_REQUIRED"))).toBe(true);
+  });
+
+  it("returns false for non-archived errors", () => {
+    expect(isArchivedError(new DidNotFoundError(DID))).toBe(false);
+    expect(isArchivedError(new TypeError("fetch failed"))).toBe(false);
+    expect(isArchivedError(new Error("HostError: Error(Contract, #1)"))).toBe(false);
   });
 });
 
@@ -50,9 +72,22 @@ describe("unwrapResult", () => {
 });
 
 describe("mapCallError", () => {
-  it("rethrows typed DID errors unchanged", () => {
-    const err = new DidNotFoundError(DID);
-    expect(() => mapCallError(err, DID)).toThrow(err);
+  it("rethrows typed DID and network errors unchanged", () => {
+    const notFound = new DidNotFoundError(DID);
+    expect(() => mapCallError(notFound, DID)).toThrow(notFound);
+
+    const archived = new DidArchivedError(DID);
+    expect(() => mapCallError(archived, DID)).toThrow(archived);
+
+    const net = new NetworkError("down");
+    expect(() => mapCallError(net, DID)).toThrow(net);
+  });
+
+  it("maps archived simulation errors to DidArchivedError", () => {
+    const expired = new AssembledTransaction.Errors.ExpiredState(
+      "You need to restore some contract state before you can invoke this method.",
+    );
+    expect(() => mapCallError(expired, DID)).toThrow(DidArchivedError);
   });
 
   it("maps transport and unknown failures", () => {

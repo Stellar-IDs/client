@@ -159,10 +159,11 @@ Every public export has JSDoc and at least one test.
 | Function | What it does | Needs a signer |
 |---|---|:---:|
 | `createIdentity({ signer, keys?, services?, … })` | Registers the DID for the signer's account. Returns `{ did, hash, … }`. | ✅ |
-| `resolveIdentity(did, options?)` | Returns a W3C-style resolution result: `didDocument`, `didDocumentMetadata` (including `versionId`) and `didResolutionMetadata` (including `error` for tombstones). | — |
+| `resolveIdentity(did, options?)` | Returns a W3C-style resolution result: `didDocument`, `didDocumentMetadata` (including `versionId`) and `didResolutionMetadata` (including `error` for tombstones). Supports multi-RPC failover and optional `DidCache`. | — |
+| `restoreIdentity(did, { signer, … })` | Restores an archived on-chain DID entry via Soroban `RestoreFootprintOp` when `resolveIdentity` throws `DidArchivedError`. | ✅ |
 | `updateIdentity(did, patch, { signer })` | Applies a patch: `addKeys`, `removeKeyIds`, `authentication`, `assertionMethod`, `addServices`, `removeServiceIds`. | ✅ |
 | `deactivateIdentity(did, { signer })` | Permanently deactivates the DID. | ✅ |
-| `createDidReader(network)` | Builds a reusable read-only reader for repeated lookups. | — |
+| `createDidReader(network, options?)` | Builds a reusable read-only reader with multi-RPC failover and optional TTL-bounded caching (`InMemoryDidCache`). | — |
 | `toW3CDocument(record, did)` | Renders an on-chain record as a JSON-LD DID Document (a minimal one for tombstones). | — |
 | `parseDid(did)` / `formatDid(…)` | Parse and build DIDs with address checksum validation. | — |
 | `publicKeyToMultibase` / `multibaseToPublicKeyHex` | Convert between raw Ed25519 keys and `z…` multibase. | — |
@@ -275,6 +276,7 @@ Every failure extends `StellarIdError`:
 | `DidParseError` | The DID string is malformed or its address fails the checksum |
 | `DidNotFoundError` | No DID is registered for the address |
 | `DidDeactivatedError` | The DID is a tombstone and the operation needs an active one |
+| `DidArchivedError` | The DID's Soroban ledger entry has expired/archived and must be restored with `restoreIdentity` |
 | `InvalidProofError` | A signature, challenge, domain or nonce check failed |
 | `CredentialRevokedError` | The credential's anchor is revoked |
 | `CredentialExpiredError` | The credential is past its expiry |
@@ -298,10 +300,13 @@ so you rarely see raw RPC errors.
 
 `testnetConfig()` is the default everywhere and points at the public Soroban testnet RPC. `publicConfig()`
 exists so the types and DID format (`did:stellar:public:…`) are complete, **but mainnet is unsupported and
-untested**. Pass a `NetworkConfig` to override the RPC URL or contract ID.
+untested**. Pass a `NetworkConfig` to override a single `rpcUrl`, configure ordered failover across multiple
+`rpcUrls` (`testnetConfig({ rpcUrls: ["https://primary…", "https://backup…"] })`), or supply an optional
+TTL-bounded `InMemoryDidCache` to `createDidReader` / `resolveIdentity`.
 
 Write operations: **simulate → sign → submit → poll**, with retry and backoff on transport errors only
-(a contract rejection is never retried). Reads use simulation and cost nothing.
+(a contract rejection is never retried). Reads use simulation and cost nothing; if a DID entry is archived,
+`resolveIdentity` throws `DidArchivedError` and `restoreIdentity(did, { signer })` restores its footprint.
 
 ## Security notes
 
@@ -358,9 +363,10 @@ test/               # unit tests, shared vectors, opt-in integration test
 
 ## Implemented, and not yet
 
-**Implemented and tested:** the lifecycle functions above, W3C rendering, credential issue/verify/revoke,
-challenge/response sign-in, `KeypairSigner`, a `WalletsKitSigner` adapter, typed errors, and a live testnet
-integration run.
+**Implemented and tested:** the lifecycle functions above, multi-RPC resolver failover, TTL-bounded resolver
+caching (`DidCache` / `InMemoryDidCache`), archived-entry detection (`DidArchivedError`) and `restoreIdentity`,
+W3C rendering, credential issue/verify/revoke, challenge/response sign-in, `KeypairSigner`, a `WalletsKitSigner`
+adapter, typed errors, and a live testnet integration run.
 
 **Not yet — planned as open contributor issues** (extension points are marked `TODO(wave: client-N)`):
 
@@ -368,11 +374,9 @@ integration run.
 |---|---|
 | client-1 | Types and parsing for newly registered DID methods and networks |
 | client-2 | Verified connectors for real wallets (Freighter, xBull, Albedo, LOBSTR) |
-| client-3 | Resolver fallback across multiple RPC endpoints |
 | client-4 | Comprehensive SDK documentation: TypeDoc site, cookbook, error reference |
 
-**Also not present:** social or passkey login, restoring archived ledger entries automatically, and
-mainnet support.
+**Also not present:** social or passkey login, and mainnet support.
 
 ## Contributing, security and license
 
