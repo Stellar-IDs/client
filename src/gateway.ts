@@ -5,10 +5,11 @@
  *
  * Not part of the public API surface beyond what `index.ts` re-exports.
  */
-import type { AssembledTransaction } from "@stellar/stellar-sdk/contract";
+import { AssembledTransaction } from "@stellar/stellar-sdk/contract";
+import type { ClientOptions, Result } from "@stellar/stellar-sdk/contract";
 import { Client } from "./generated/index.js";
-import type { Result } from "@stellar/stellar-sdk/contract";
 import {
+  DidArchivedError,
   DidDeactivatedError,
   DidNotFoundError,
   NetworkError,
@@ -45,10 +46,7 @@ export function contractErrorName(err: unknown): string | undefined {
   // `Result.unwrapErr()` yields a plain `{ message }` (stellar-sdk
   // `ErrorMessage`), not an `Error`, so read `message` structurally.
   const message =
-    typeof err === "object" &&
-    err !== null &&
-    "message" in err &&
-    typeof err.message === "string"
+    typeof err === "object" && err !== null && "message" in err && typeof err.message === "string"
       ? err.message
       : String(err);
   // Failed write simulations carry only the host error code.
@@ -60,18 +58,57 @@ export function contractErrorName(err: unknown): string | undefined {
 }
 
 /**
+ * Detect whether an SDK or Soroban RPC failure indicates that a required
+ * ledger entry has expired and been archived.
+ *
+ * @param err - Caught error or simulation diagnostic value.
+ * @returns `true` if the failure represents archived Soroban contract state.
+ */
+export function isArchivedError(err: unknown): boolean {
+  if (err instanceof DidArchivedError) {
+    return true;
+  }
+  if (err instanceof AssembledTransaction.Errors.ExpiredState) {
+    return true;
+  }
+  if (typeof err === "object" && err !== null) {
+    if ("name" in err && err.name === "ExpiredStateError") {
+      return true;
+    }
+    if ("restorePreamble" in err && err.restorePreamble !== undefined) {
+      return true;
+    }
+  }
+  const message =
+    typeof err === "object" && err !== null && "message" in err && typeof err.message === "string"
+      ? err.message
+      : String(err);
+  return /restore some contract state|entry is archived|archived ledger entry|LEDGER_ENTRY_RESTORATION_REQUIRED/i.test(
+    message,
+  );
+}
+
+/**
  * Build a typed contract client for a network.
  *
  * @param network - Network configuration.
- * @param publicKey - Optional invoker address (required for mutations).
+ * @param publicKey - Optional invoker address (required for mutations and restores).
+ * @param rpcUrlOverride - Optional endpoint URL override (used during multi-RPC failover).
+ * @param signTransaction - Optional transaction signing callback.
  * @returns The generated contract client.
  */
-export function buildClient(network: NetworkConfig, publicKey?: string): Client {
+export function buildClient(
+  network: NetworkConfig,
+  publicKey?: string,
+  rpcUrlOverride?: string,
+  signTransaction?: ClientOptions["signTransaction"],
+): Client {
   return new Client({
     contractId: network.contractId,
     networkPassphrase: network.networkPassphrase,
-    rpcUrl: network.rpcUrl,
+    rpcUrl: rpcUrlOverride ?? network.rpcUrl,
     ...(publicKey === undefined ? {} : { publicKey }),
+    ...(signTransaction === undefined ? {} : { signTransaction }),
   });
 }
 
@@ -98,7 +135,9 @@ export function unwrapResult<T>(result: Result<T> | T, did: string): T {
       if (name === "Deactivated") {
         throw new DidDeactivatedError(did);
       }
-      throw new SimulationError(`contract rejected the call${name === undefined ? "" : `: ${name}`}`);
+      throw new SimulationError(
+        `contract rejected the call${name === undefined ? "" : `: ${name}`}`,
+      );
     }
     return r.unwrap();
   }
@@ -112,13 +151,22 @@ export function unwrapResult<T>(result: Result<T> | T, did: string): T {
  * @param did - DID string for error context.
  * @returns Never returns; always throws the mapped error.
  * @throws {NetworkError} On transport-level failures.
+ * @throws {DidArchivedError} When the DID's ledger entry is archived.
  * @throws {DidNotFoundError} On contract `NotFound`.
  * @throws {DidDeactivatedError} On contract `Deactivated`.
  * @throws {SimulationError} On everything else.
  */
 export function mapCallError(err: unknown, did: string): never {
-  if (err instanceof DidNotFoundError || err instanceof DidDeactivatedError) {
+  if (
+    err instanceof DidNotFoundError ||
+    err instanceof DidDeactivatedError ||
+    err instanceof DidArchivedError ||
+    err instanceof NetworkError
+  ) {
     throw err;
+  }
+  if (isArchivedError(err)) {
+    throw new DidArchivedError(did, err);
   }
   const message = err instanceof Error ? err.message : String(err);
   if (

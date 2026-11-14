@@ -15,6 +15,7 @@ export {
   DidParseError,
   DidNotFoundError,
   DidDeactivatedError,
+  DidArchivedError,
   InvalidProofError,
   CredentialRevokedError,
   CredentialExpiredError,
@@ -22,23 +23,34 @@ export {
   SimulationError,
   WalletError,
 } from "./errors.js";
-export { testnetConfig, publicConfig, TESTNET_RPC_URL } from "./networks.js";
+export { testnetConfig, publicConfig, resolveRpcUrls, TESTNET_RPC_URL } from "./networks.js";
 export type { NetworkConfig } from "./networks.js";
+export { isArchivedError } from "./gateway.js";
 export { KeypairSigner, WalletsKitSigner } from "./signers.js";
-export type {
-  Signer,
-  SignTransactionOptions,
-  WalletKitLike,
-} from "./signers.js";
+export type { Signer, SignTransactionOptions, WalletKitLike } from "./signers.js";
 export { toW3CDocument, publicKeyToMultibase, multibaseToPublicKeyHex } from "./w3c.js";
 export type { DidDocument, W3CVerificationMethod, W3CService } from "./w3c.js";
-export { resolveIdentity, createDidReader } from "./resolver.js";
+export {
+  resolveIdentity,
+  createDidReader,
+  restoreIdentity,
+  InMemoryDidCache,
+  didCacheKey,
+  DEFAULT_RESOLVER_CACHE_TTL_MS,
+} from "./resolver.js";
 export type {
   DidReader,
+  DidCache,
+  InMemoryDidCacheOptions,
+  CreateDidReaderOptions,
+  RpcResolveTransport,
   ResolveOptions,
   ResolutionMetadata,
   DocumentMetadata,
   ResolutionResult,
+  RestoreIdentityOptions,
+  RestoreIdentityResult,
+  RestoreExecutor,
 } from "./resolver.js";
 export { createIdentity, updateIdentity, deactivateIdentity } from "./identity.js";
 export type {
